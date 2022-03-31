@@ -15,6 +15,6 @@ spec:
     spec:
       containers:
       - name: static
-        image: 274401088258.dkr.ecr.ap-southeast-1.amazonaws.com/aws-eks:number .
+        image: 861531569385.dkr.ecr.ap-south-1.amazonaws.com/first-repo:$BUILD_NUMBER .
         ports:
         - containerPort: 80
