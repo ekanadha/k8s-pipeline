@@ -5,7 +5,7 @@ metadata:
  namespace: static
 spec:
  rules:
- - host: static.page.com
+ - host: k8s.devopscoursewithbalakonda.xyz
    http:
      paths:
      - path:
