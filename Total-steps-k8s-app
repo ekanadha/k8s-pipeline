@@ -1,0 +1,268 @@
+
+
+Refer:- https://www.eksworkshop.com
+
+
+1) First we create cluster using eksctl or terraform or console.
+
+
+
+---- download eksctl 
+
+ curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+
+sudo mv -v /tmp/eksctl /usr/local/bin
+
+---- eksctl version
+---- run below command to create the yaml for cluster purpose (change region, AZ  and delete secret encryption)
+
+ cat << EOF > eksworkshop.yaml
+---
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: eksworkshop-eksctl
+  region: ${AWS_REGION}
+  version: "1.19"
+
+availabilityZones: ["${AZS[0]}", "${AZS[1]}", "${AZS[2]}"]
+
+managedNodeGroups:
+- name: nodegroup
+  desiredCapacity: 3
+  instanceType: t3.small
+  ssh:
+    enableSsm: true
+
+# To enable all of the control plane logs, uncomment below:
+# cloudWatch:
+#  clusterLogging:
+#    enableTypes: ["*"]
+
+secretsEncryption:
+  keyARN: ${MASTER_ARN}
+EOF
+
+-- run to create cluster ( take 15 minutes to create)
+eksctl create cluster -f eksworkshop.yaml
+
+2) Download the Kubectl(1.19 version) command (client)
+-- By using config file(.kube/config) we can connect to cluster with kubectl
+
+ curl -o kubectl https://amazon-eks.s3.us-west-2.amazonaws.com/1.19.6/2021-01-05/bin/linux/amd64/kubectl
+
+---- mv or cp kubectl /usr/local/bin  ------ to run from anywhere
+
+---- kubectl get nodes    --- check once
+
+3)Download kubens command, it will help u no need to pass namespace for every time(Not Mandatory)
+
+https://github.com/ahmetb/kubectx/releases/download/v0.9.4/kubens_v0.9.4_linux_x86_64.tar.gz
+
+extract and move /usr/local/bin
+
+It helps :- kubectl get pod -n static --- Before
+            kubens get pod  --- after
+            kubens  -- show all namespaces and current ns also
+              
+
+
+4)Prepare Code (put static code, Dockerfile, all yaml files in github)
+  
+--- i) for static page code  -- go to free-css.com
+--- ii) Dockerfile
+       
+    FROM httpd
+    COPY . /usr/local/apache2/htdocs
+--- iii) Prepare yaml files (SYNTAX MOST IMPORTANT IN YAML FILES)
+
+Flow of yaml files:- first go to ingress.yaml file --in that file selects svc
+                     Second go to Svc.yaml file -- in that file selects Deployment
+                     third go to Deployment.yaml file -- in that selects image and Creates pods based on replica count
+  
+ namespace.yaml (we can change name of the ns)
+--------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app-ns
+
+
+ingress.yaml (we can change  ns,host, svc-name)
+---------------
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+ name: static-ingress
+ namespace: app-ns
+spec:
+ rules:
+ - host: k8s.devopscoursewithbalakonda.xyz
+   http:
+     paths:
+     - path:
+       backend:
+         serviceName: static-svc
+         servicePort: 80
+
+
+service.yaml ( we can change ns,app)
+---------------
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: static-svc
+  namespace: app-ns
+spec:
+  selector:
+    app: static-dept
+  ports:
+  - port: 80
+    targetPort: 80
+
+deployment.yaml (we can change ns,app,image)
+------------------ 
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: static-deployment
+  namespace: app-ns
+spec:
+  selector:
+    matchLabels:
+      app: static-dept
+  replicas: 5 # tells deployment to run 2 pods matching the template
+  template:
+    metadata:
+      labels:
+        app: static-dept
+    spec:
+      containers:
+      - name: static
+        image: 861531569385.dkr.ecr.ap-south-1.amazonaws.com/first-repo:number 
+        ports:
+        - containerPort: 80
+
+5) Install jenkins and setup jenkins
+
+*** ATTACH ADMIN ACCESS ROLE TO THE JENKINS ***
+
+-- copy confing file /var/lib/jenkins/.kube/config
+-- test -- kubectl get nodes
+
+
+6) Create pipeline job in jenkins
+----------------------------------
+
+pipeline {
+    agent any
+
+    stages {
+        stage('Git_checkout') {
+             steps {
+                git branch: 'main', url: 'https://github.com/balu1391/k8s-static-page-code.git'
+            }
+        }
+        stage('docker login') {
+            steps {
+                sh 'aws ecr get-login-password --region ap-south-1 | sudo docker login --username AWS --password-stdin 861531569385.dkr.ecr.ap-south-1.amazonaws.com'
+            }
+        }
+        stage('docker build') {
+            steps {
+		        sh 'sudo docker build -t 861531569385.dkr.ecr.ap-south-1.amazonaws.com/first-repo:$BUILD_NUMBER .'
+                }
+        }
+        stage('docker image') {
+            steps {
+		        sh 'sudo docker push 861531569385.dkr.ecr.ap-south-1.amazonaws.com/first-repo:$BUILD_NUMBER'
+                }
+        }
+        stage('replace build number') {
+            steps {
+		        sh 'sed -i s/number/$BUILD_NUMBER/g all-yaml/deployment.yaml'
+                }
+        }
+        stage('1.namespace') {
+            steps {
+		        sh 'kubectl apply -f all-yaml/namespace.yaml'
+                }
+        }
+         stage('2.deployment') {
+            steps {
+		        sh 'kubectl apply -f all-yaml/deployment.yaml'
+                }
+        }
+        stage('3.service') {
+            steps {
+		        sh 'kubectl apply -f all-yaml/service.yaml'
+                }
+        }
+        stage('4.ingress') {
+            steps {
+		        sh 'kubectl apply -f all-yaml/ingress.yaml'
+                }
+        }
+        stage('get ingress enpoint') {
+            steps {
+		        sh 'kubectl get ingress -n static'
+                }
+        }
+        stage('describe ingress pod') {
+            steps {
+		        sh 'kubectl get po -n ingress-nginx'
+                }
+        }
+        stage('check host and path rules') {
+            steps {
+		        sh 'kubectl describe po ingress-nginx-controller-98f46f89d-49nvs -n ingress-nginx'
+                }
+        }
+   }
+}
+
+
+7)After successfully running the pipeline, NLB will be reated automatically
+ 
+ Create record set In Route-53 (record will be same as in the ingress.yaml file)
+
+ Access app with Domain name only, (With NLB endpoint it won't work sometimes)
+
+
+
+8) Create webhook in Github
+
+-- repo settings -- webhook -- add -- http://54.250.38.218:8080/github-webhook/
+
+9) Now test the Webhook
+
+ --- change static page code in Github 
+ --- It triggers Jenkins job, job will run
+ --- Check the app is changed or not
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
