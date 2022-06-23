@@ -5,7 +5,7 @@ metadata:
  namespace: static
 spec:
  rules:
- - host: k8s.devopscoursewithbalakonda.xyz
+ - host: clr-static.ajendra.xyz
    http:
      paths:
      - path:
